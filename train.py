@@ -3,6 +3,9 @@ import sys
 import torch
 import torch.autograd as autograd
 import torch.nn.functional as F
+import wandb
+from transformers import get_linear_schedule_with_warmup
+from utils import *
 
 
 def train(train_iter, dev_iter, model, args):
@@ -10,6 +13,8 @@ def train(train_iter, dev_iter, model, args):
         model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    getsch = get_cosine_schedule_with_warmup if args.scheduler =='cosine' else get_linear_schedule_with_warmup
+    scheduler = getsch(optimizer, args.warmup, args.early_stop)
 
     steps = 0
     best_acc = 0
@@ -17,8 +22,14 @@ def train(train_iter, dev_iter, model, args):
     for epoch in range(1, args.epochs+1):
         for batch in train_iter:
             model.train()
-            feature, target = batch.text, batch.label
-            feature.t_(), target.sub_(1)  # batch first, index align
+            if not args.scatterlab:
+                feature, target = batch.text, batch.label
+                feature.t_(), target.sub_(1)  # batch first, index align
+            else: # scatterlab data
+                b, l, datasetids = batch
+                feature, target = b.input_ids, l
+                bsz = len(b.input_ids)
+
             if args.cuda:
                 feature, target = feature.cuda(), target.cuda()
 
@@ -27,17 +38,26 @@ def train(train_iter, dev_iter, model, args):
             loss = F.cross_entropy(logit, target)
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             steps += 1
             if steps % args.log_interval == 0:
                 corrects = (torch.max(logit, 1)[1].view(target.size()).data == target.data).sum()
-                accuracy = 100.0 * corrects/batch.batch_size
+                accuracy = 100.0 * corrects/(bsz if args.scatterlab else batch.batch_size)
+                wandb.log(
+                    {
+                        'train_step/lr': get_lr_from_optim(optimizer),
+                        'train_step/acc':  accuracy,
+                        'train_step/loss': loss.item()
+                    }
+                )
                 sys.stdout.write(
-                    '\rBatch[{}] - loss: {:.6f}  acc: {:.4f}%({}/{})'.format(steps, 
-                                                                             loss.item(), 
+                    '\rBatch[{}] - loss: {:.6f}  acc: {:.4f}%({}/{})'.format(steps,
+                                                                             loss.item(),
                                                                              accuracy.item(),
                                                                              corrects.item(),
-                                                                             batch.batch_size))
+                                                                             bsz if args.scatterlab else batch.batch_size))
+
             if steps % args.test_interval == 0:
                 dev_acc = eval(dev_iter, model, args)
                 if dev_acc > best_acc:
@@ -48,6 +68,8 @@ def train(train_iter, dev_iter, model, args):
                 else:
                     if steps - last_step >= args.early_stop:
                         print('early stop by {} steps.'.format(args.early_stop))
+                        save(model, args.save_dir, 'snapshot', steps)
+                        return None
             elif steps % args.save_interval == 0:
                 save(model, args.save_dir, 'snapshot', steps)
 
@@ -56,8 +78,14 @@ def eval(data_iter, model, args):
     model.eval()
     corrects, avg_loss = 0, 0
     for batch in data_iter:
-        feature, target = batch.text, batch.label
-        feature.t_(), target.sub_(1)  # batch first, index align
+        if not args.scatterlab:
+            feature, target = batch.text, batch.label
+            feature.t_(), target.sub_(1)  # batch first, index align
+        else: # scatterlab data
+            b, l, datasetids = batch
+            feature, target = b.input_ids, l
+            bsz = len(b.input_ids)
+
         if args.cuda:
             feature, target = feature.cuda(), target.cuda()
 
@@ -68,12 +96,18 @@ def eval(data_iter, model, args):
         corrects += (torch.max(logit, 1)
                      [1].view(target.size()).data == target.data).sum()
 
-    size = len(data_iter.dataset)
+    size = len(data_iter)*bsz if args.scatterlab else len(data_iter.dataset)
     avg_loss /= size
     accuracy = 100.0 * corrects/size
-    print('\nEvaluation - loss: {:.6f}  acc: {:.4f}%({}/{}) \n'.format(avg_loss, 
-                                                                       accuracy, 
-                                                                       corrects, 
+    wandb.log(
+        {
+            'dev_ckpt/acc':  accuracy,
+            'dev_ckpt/loss': avg_loss
+        }
+    )
+    print('\nEvaluation - loss: {:.6f}  acc: {:.4f}%({}/{}) \n'.format(avg_loss,
+                                                                       accuracy,
+                                                                       corrects,
                                                                        size))
     return accuracy
 
@@ -99,4 +133,5 @@ def save(model, save_dir, save_prefix, steps):
         os.makedirs(save_dir)
     save_prefix = os.path.join(save_dir, save_prefix)
     save_path = '{}_steps_{}.pt'.format(save_prefix, steps)
+    print(save_path)
     torch.save(model.state_dict(), save_path)
