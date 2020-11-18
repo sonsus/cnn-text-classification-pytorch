@@ -1,0 +1,2 @@
+python main.py --test --scatterlab True --snapshot snapshot/57.3200.pt
+python main.py --test --scatterlab True --snapshot snapshot/57.1800.pt

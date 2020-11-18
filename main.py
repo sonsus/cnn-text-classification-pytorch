@@ -88,8 +88,9 @@ if args.scatterlab:
     EXPCONF.bsz = args.batch_size
     EXPCONF.scheduler = args.scheduler
     wandb.config.update(EXPCONF) # from albert/paraphrase
-    train_iter, vocab, trainds = get_loader(EXPCONF)
-    dev_iter, vocab, devds = get_loader(EXPCONF, getdev=True)
+    if not args.test:
+        train_iter, vocab, trainds = get_loader(EXPCONF)
+    dev_iter, vocab, devds = get_loader(EXPCONF, getdev=True) # vocab is already made by prepdata.py albert_paraphrase
 else:
     text_field = data.Field(lower=True)
     label_field = data.Field(sequential=False)
@@ -126,10 +127,13 @@ if args.predict is not None:
     label = train.predict(args.predict, cnn, text_field, label_field, args.cuda)
     print('\n[Text]  {}\n[Label] {}\n'.format(args.predict, label))
 elif args.test:
-    try:
-        train.eval(test_iter, cnn, args)
-    except Exception as e:
-        print("\nSorry. The test dataset doesn't  exist.\n")
+
+    if args.scatterlab:
+        testconf = EXPCONF.copy()
+        testconf.datamode = 'test'
+        test_iter, _, __ = get_loader(testconf)
+    train.eval(test_iter, cnn, args, submission=True)
+    
 else:
     print()
     try:

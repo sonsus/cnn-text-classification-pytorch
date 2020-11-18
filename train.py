@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import wandb
 from transformers import get_linear_schedule_with_warmup
 from utils import *
-
+from pathlib import Path
 
 def train(train_iter, dev_iter, model, args):
     if args.cuda:
@@ -74,42 +74,67 @@ def train(train_iter, dev_iter, model, args):
                 save(model, args.save_dir, 'snapshot', steps)
 
 
-def eval(data_iter, model, args):
+def eval(data_iter, model, args, submission=False):
     model.eval()
     corrects, avg_loss = 0, 0
+    args.snapshot = Path(args.snapshot)
+
+    if submission:
+        f= open(f"sub_{args.snapshot.stem}.csv", 'w')
+        f.write("id,label\n")
     for batch in data_iter:
         if not args.scatterlab:
             feature, target = batch.text, batch.label
             feature.t_(), target.sub_(1)  # batch first, index align
+        elif submission:
+            b, _, datasetids = batch
+            feature = b.input_ids
+            bsz = len(b.input_ids)
         else: # scatterlab data
             b, l, datasetids = batch
             feature, target = b.input_ids, l
             bsz = len(b.input_ids)
 
         if args.cuda:
-            feature, target = feature.cuda(), target.cuda()
+            if submission:
+                feature = feature.cuda()
+            else:
+                feature, target = feature.cuda(), target.cuda()
 
         logit = model(feature)
-        loss = F.cross_entropy(logit, target, size_average=False)
+        if not submission:
+            loss = F.cross_entropy(logit, target, size_average=False)
 
-        avg_loss += loss.item()
-        corrects += (torch.max(logit, 1)
-                     [1].view(target.size()).data == target.data).sum()
+        inferred = logit.argmax(dim=1)
 
+        if submission:
+            for id,l in zip(datasetids, inferred):
+                line = f"{id},{l}\n"
+                f.write(line)
+
+
+        if not submission:
+            avg_loss += loss.item()
+            corrects += (torch.max(logit, 1)
+                         [1].view(target.size()).data == target.data).sum()
+
+    if submission:
+        f.close()
     size = len(data_iter)*bsz if args.scatterlab else len(data_iter.dataset)
-    avg_loss /= size
-    accuracy = 100.0 * corrects/size
-    wandb.log(
-        {
-            'dev_ckpt/acc':  accuracy,
-            'dev_ckpt/loss': avg_loss
-        }
-    )
-    print('\nEvaluation - loss: {:.6f}  acc: {:.4f}%({}/{}) \n'.format(avg_loss,
+    if not submission:
+        avg_loss /= size
+        accuracy = 100.0 * corrects/size
+        wandb.log(
+            {
+                'dev_ckpt/acc':  accuracy,
+                'dev_ckpt/loss': avg_loss
+            }
+        )
+        print('\nEvaluation - loss: {:.6f}  acc: {:.4f}%({}/{}) \n'.format(avg_loss,
                                                                        accuracy,
                                                                        corrects,
                                                                        size))
-    return accuracy
+    return accuracy if not submission else None
 
 
 def predict(text, model, text_field, label_feild, cuda_flag):
