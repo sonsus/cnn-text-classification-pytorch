@@ -1,0 +1,25 @@
+method: grid
+metric:
+    goal: maximize
+    name: dev_ckpt/acc
+parameters:
+    lr: #based on https://wandb.ai/sonsus/albert_paraphrase/runs/8w194kha?workspace=user-sonsus
+        values:
+        - 5e-4
+        - 1e-4
+        - 5e-5
+        - 1e-5
+    early-stop:
+        values:
+        - 5000
+        - 10000
+        - 100000
+    scheduler:
+        value: linear
+    scatterlab:
+        value: true
+program: main.py
+command:
+    - python
+    - ${program}
+    - ${args}

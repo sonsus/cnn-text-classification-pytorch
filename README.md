@@ -1,3 +1,14 @@
+## modif usage for test
+```bash
+python main.py --scatterlab True --lr [floatnumber] --early-stop [numiterations] --scheduler [linear, cosine]
+python main.py --scatterlab True --test --snapshot [snapshotpath]
+
+python main.py --scatterlab True --debug 
+python main.py --scatterlab True --debug --test --snapshot [snapshotpath]
+```
+- data preprocessing is needed (used dataload.py from https://github.com/sonsus/albert\_paraphrase)
+- code is haphazard since I started using it since 5 hrs before the deadline and edited until 10 mins left. 
+
 ## Introduction
 This is the implementation of Kim's [Convolutional Neural Networks for Sentence Classification](https://arxiv.org/abs/1408.5882) paper in PyTorch.
 

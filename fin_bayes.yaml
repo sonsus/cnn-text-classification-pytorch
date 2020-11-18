@@ -1,0 +1,26 @@
+method: bayes
+metric:
+    goal: maximize
+    name: dev_ckpt/acc
+parameters:
+    lr: #based on https://wandb.ai/sonsus/albert_paraphrase/runs/8w194kha?workspace=user-sonsus
+        distribution: uniform
+        max: 1e-3
+        min: 1e-5
+    early-stop:
+        distribution: q_uniform
+        max: 250000
+        min: 50000
+        q: 50000
+    scheduler:
+        value: linear
+    scatterlab:
+        value: true
+program: main.py
+command:
+    - python
+    - ${program}
+    - ${args}
+
+
+#CUDA_VISIBLE_DEVICES=2 nohup wandb agent sonsus/cnn-text-classification-pytorch/jidwqovb &
